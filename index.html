@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>자사몰 성적표</title>
+<style>
+body{font-family:Pretendard,-apple-system,"Malgun Gothic",system-ui,sans-serif;background:#f2f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;color:#191f28}
+.box{background:#fff;border-radius:20px;padding:32px 28px;width:330px;box-shadow:0 8px 30px rgba(0,0,0,.06)}
+h1{font-size:21px;margin:0 0 6px}
+p{color:#6b7684;font-size:14px;margin:0 0 18px;line-height:1.6}
+input[type=password]{width:100%;box-sizing:border-box;font-size:16px;padding:12px 14px;border:1px solid #d1d6db;border-radius:12px;outline:none}
+input[type=password]:focus{border-color:#3182f6}
+button{margin-top:14px;width:100%;padding:13px;border:0;border-radius:12px;background:#3182f6;color:#fff;font-size:16px;font-weight:700;cursor:pointer}
+button:disabled{opacity:.6}
+.err{color:#f04452;font-size:13px;margin-top:10px;min-height:18px}
+label{font-size:13px;color:#4e5968;display:flex;gap:6px;margin-top:12px;align-items:center;cursor:pointer}
+.wait{font-size:15px;color:#4e5968}
+</style>
+</head>
+<body>
+<div class="box" id="wait" style="display:none"><div class="wait">성적표를 여는 중이에요…</div></div>
+<form class="box" id="f" style="display:none">
+  <h1>자사몰 성적표</h1>
+  <p>비밀번호를 넣어 주세요.</p>
+  <input id="pw" type="password" autocomplete="current-password">
+  <label><input type="checkbox" id="rm" checked> 이 컴퓨터에서 기억하기</label>
+  <button id="bt">열기</button>
+  <div class="err" id="er"></div>
+</form>
+<script>
+const b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+const enc=u=>{let s='';for(let i=0;i<u.length;i+=32768)s+=String.fromCharCode.apply(null,u.subarray(i,i+32768));return btoa(s);};
+const KEY='jasamolKey';
+let D=null;
+async function data(){ if(!D){ const r=await fetch('data.txt?t='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('data'); D=await r.json(); } return D; }
+async function keyFromPw(pw,d){ const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']); return crypto.subtle.deriveKey({name:'PBKDF2',salt:b64(d.salt),iterations:d.it,hash:'SHA-256'},k,{name:'AES-GCM',length:256},true,['decrypt']); }
+async function openWith(key){ const d=await data(); const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:b64(d.iv)},key,b64(d.ct)); const html=await new Response(new Blob([pt]).stream().pipeThrough(new DecompressionStream('gzip'))).text(); document.open(); document.write(html); document.close(); }
+function showForm(msg){ document.getElementById('wait').style.display='none'; document.getElementById('f').style.display=''; document.getElementById('er').textContent=msg||''; document.getElementById('pw').focus(); }
+(async()=>{
+  const saved=localStorage.getItem(KEY);
+  if(saved){ document.getElementById('wait').style.display=''; try{ const d=await data(); const s=JSON.parse(saved); if(s.salt===d.salt){ const key=await crypto.subtle.importKey('raw',b64(s.key),{name:'AES-GCM'},false,['decrypt']); await openWith(key); return; } }catch(e){} localStorage.removeItem(KEY); }
+  showForm();
+})();
+document.getElementById('f').addEventListener('submit',async e=>{ e.preventDefault(); const bt=document.getElementById('bt'); bt.disabled=true; document.getElementById('er').textContent='';
+  try{ const d=await data(); const key=await keyFromPw(document.getElementById('pw').value,d);
+    let ok=true; try{ await crypto.subtle.decrypt({name:'AES-GCM',iv:b64(d.iv)},key,b64(d.ct)); }catch(x){ ok=false; }
+    if(!ok){ bt.disabled=false; showForm('비밀번호가 맞지 않아요.'); return; }
+    if(document.getElementById('rm').checked){ const raw=new Uint8Array(await crypto.subtle.exportKey('raw',key)); localStorage.setItem(KEY,JSON.stringify({salt:d.salt,key:enc(raw)})); }
+    await openWith(key);
+  }catch(x){ bt.disabled=false; showForm('성적표를 불러오지 못했어요. 잠시 뒤 다시 해 주세요.'); }
+});
+</script>
+</body>
+</html>
